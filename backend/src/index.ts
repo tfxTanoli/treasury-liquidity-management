@@ -18,7 +18,6 @@ import dashboardRouter from './routes/dashboard';
 import usersRouter from './routes/users';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // Security middleware
 app.use(helmet());
@@ -31,7 +30,7 @@ app.use(
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 500,
   standardHeaders: true,
   legacyHeaders: false,
@@ -67,8 +66,13 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Treasury Backend running on http://localhost:${PORT}`);
-});
+// Only start HTTP server in local dev — Vercel handles this in production
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Treasury Backend running on http://localhost:${PORT}`);
+  });
+}
 
+// Export for Vercel serverless
 export default app;
