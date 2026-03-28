@@ -16,8 +16,19 @@ export const getDashboardSummary = async (): Promise<any> => {
   ]);
 
   const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-  const executions = executionsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
   const rules = rulesSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+  // Convert Firestore Timestamps to plain { seconds, nanoseconds } so JSON serializes correctly
+  const executions = executionsSnap.docs.map(d => {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      timestamp: data.timestamp
+        ? { seconds: data.timestamp.seconds, nanoseconds: data.timestamp.nanoseconds }
+        : null,
+    };
+  }) as any[];
 
   const totalBalance = accounts.reduce((sum: number, a: any) => sum + (a.balance || 0), 0);
   const activeAccounts = accounts.filter((a: any) => a.status === 'active').length;
