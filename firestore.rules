@@ -1,0 +1,96 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ────────────────────────────────────────────────────────────
+
+    // Get the calling user's role from their Firestore profile
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin()           { return isSignedIn() && getRole() == 'admin'; }
+    function isTreasuryManager() { return isSignedIn() && getRole() == 'treasury_manager'; }
+    function isApprover()        { return isSignedIn() && getRole() == 'approver'; }
+    function isViewer()          { return isSignedIn() && getRole() == 'viewer'; }
+    function isSignedIn()        { return request.auth != null; }
+
+    // All four roles can read
+    function canRead()   { return isAdmin() || isTreasuryManager() || isApprover() || isViewer(); }
+    // Admin + Treasury Manager can write data
+    function canWrite()  { return isAdmin() || isTreasuryManager(); }
+    // Only admin can approve/activate
+    function canApprove(){ return isAdmin() || isApprover(); }
+
+    // ─── users ──────────────────────────────────────────────────────────────
+    // Users can read/write their own profile (for self-registration).
+    // Admins can read/write all profiles.
+    match /users/{uid} {
+      allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == uid
+                       && request.resource.data.role == 'viewer';  // self-signup always viewer
+      allow update: if isAdmin()
+                       || (isSignedIn() && request.auth.uid == uid
+                           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+      allow delete: if isAdmin();
+    }
+
+    // ─── accounts ───────────────────────────────────────────────────────────
+    match /accounts/{id} {
+      allow read:   if canRead();
+      allow create,
+            update: if canWrite();
+      allow delete: if isAdmin();
+    }
+
+    // ─── pools ──────────────────────────────────────────────────────────────
+    match /pools/{id} {
+      allow read:   if canRead();
+      allow create,
+            update: if canWrite();
+      allow delete: if isAdmin();
+    }
+
+    // ─── poolAccounts (pool membership) ─────────────────────────────────────
+    match /poolAccounts/{id} {
+      allow read:   if canRead();
+      allow create,
+            update,
+            delete: if canWrite();
+    }
+
+    // ─── sweepRules ─────────────────────────────────────────────────────────
+    // Drafts & edits: admin + treasury_manager
+    // Status transitions to approved/active/paused: admin + approver
+    match /sweepRules/{id} {
+      allow read: if canRead();
+      allow create: if canWrite();
+      allow update: if canWrite()
+                    || (canApprove()
+                        && request.resource.data.diff(resource.data)
+                           .affectedKeys().hasOnly(['status', 'updatedAt', 'updatedBy']));
+      allow delete: if isAdmin();
+    }
+
+    // ─── approvals ──────────────────────────────────────────────────────────
+    match /approvals/{id} {
+      allow read:   if canRead();
+      allow create: if canApprove();   // approver or admin writes approval records
+      allow update,
+            delete: if isAdmin();
+    }
+
+    // ─── executions ─────────────────────────────────────────────────────────
+    // Written only by backend (Admin SDK bypasses rules); frontend is read-only
+    match /executions/{id} {
+      allow read:   if canRead();
+      allow write:  if false;   // backend Admin SDK only
+    }
+
+    // ─── Deny everything else ───────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
